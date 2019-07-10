@@ -99,8 +99,11 @@ int main() {
 		  double dist_inc = 0.5;
 		  for (int i = 0; i < 50; ++i) 
 		  {
-			  next_x_vals.push_back(car_x + (dist_inc*i)*cos(deg2rad(car_yaw)));
-			  next_y_vals.push_back(car_y + (dist_inc*i)*sin(deg2rad(car_yaw)));
+			  double nextS = car_s + (i + 1.0)*dist_inc;
+			  double nextD = 6.0; // middle line
+			  vector<double> xyVect = getXY(nextS, nextD, map_waypoints_s, map_waypoints_x, map_waypoints_y);
+			  next_x_vals.push_back(xyVect[0]);
+			  next_y_vals.push_back(xyVect[1]);
 		  }
           /**
            * TODO: define a path made up of (x,y) points that the car will visit
