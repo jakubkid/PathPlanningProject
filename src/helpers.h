@@ -1,13 +1,14 @@
 #ifndef HELPERS_H
 #define HELPERS_H
 
+#ifdef _MSC_VER
+#define _USE_MATH_DEFINES
+#endif
 #include <math.h>
 #include <string>
 #include <vector>
 
-#ifdef _MSC_VER
-#define M_PI 3.14159265358979323846
-#endif
+
 // for convenience
 using std::string;
 using std::vector;

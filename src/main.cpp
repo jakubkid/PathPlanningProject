@@ -96,7 +96,12 @@ int main() {
 
           vector<double> next_x_vals;
           vector<double> next_y_vals;
-
+		  double dist_inc = 0.5;
+		  for (int i = 0; i < 50; ++i) 
+		  {
+			  next_x_vals.push_back(car_x + (dist_inc*i)*cos(deg2rad(car_yaw)));
+			  next_y_vals.push_back(car_y + (dist_inc*i)*sin(deg2rad(car_yaw)));
+		  }
           /**
            * TODO: define a path made up of (x,y) points that the car will visit
            *   sequentially every .02 seconds
@@ -144,9 +149,14 @@ int main() {
 #endif
     std::cout << "Disconnected" << std::endl;
   });
-
+#ifdef _MSC_VER
+  int port = 4567;
+  auto host = "127.0.0.1";
+  if (h.listen(host, port)) {
+#else
   int port = 4567;
   if (h.listen(port)) {
+#endif
     std::cout << "Listening to port " << port << std::endl;
   } else {
     std::cerr << "Failed to listen to port" << std::endl;
