@@ -7,6 +7,7 @@
 #include "Eigen-3.3/Eigen/QR"
 #include "helpers.h"
 #include "json.hpp"
+#include "spline.h"
 
 // for convenience
 using nlohmann::json;
@@ -42,13 +43,16 @@ int main() {
     iss >> y;
     iss >> s;
     iss >> d_x;
-    iss >> d_y;
+    iss >> d_y; 
     map_waypoints_x.push_back(x);
     map_waypoints_y.push_back(y);
     map_waypoints_s.push_back(s);
     map_waypoints_dx.push_back(d_x);
     map_waypoints_dy.push_back(d_y);
   }
+  int line = 1;
+  double targetSpeed = 49.99;
+
   h.onMessage([&map_waypoints_x,&map_waypoints_y,&map_waypoints_s,
                &map_waypoints_dx,&map_waypoints_dy]
 #ifdef _MSC_VER
@@ -93,6 +97,21 @@ int main() {
           auto sensor_fusion = j[1]["sensor_fusion"];
 
           json msgJson;
+		  auto prevSize = previous_path_x.size();
+		  //Desired car position spaced at 30m
+		  vector<double> sparsePosX;
+		  vector<double> sparsePosY;
+
+		  //car postion will be a new refference
+		  double refX = car_x;
+		  double refY = car_y;
+		  double ref_yaw = deg2rad(car_yaw);
+		  if (prevSize < 2)
+		  {
+			  double prevCarX = refX - cos(ref_yaw) * car_speed;
+			  double prevCarY = refY - sin(ref_yaw) * car_speed;
+		  }
+
 
           vector<double> next_x_vals;
           vector<double> next_y_vals;
@@ -109,6 +128,7 @@ int main() {
            * TODO: define a path made up of (x,y) points that the car will visit
            *   sequentially every .02 seconds
            */
+
 
 
           msgJson["next_x"] = next_x_vals;
