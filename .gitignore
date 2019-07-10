@@ -1,2 +1,4 @@
 #Ignore folder build
 build/
+VisualStudio/x64
+VisualStudio/.vs
