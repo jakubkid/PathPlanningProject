@@ -10,7 +10,7 @@
 #include "spline.h"
 #define MAX_SPEED_MS 22.3 // 22.3m/s ~50mph
 #define MAX_ACC_MS2 9.5
-#define MAX_JERK_MS3 9.5 
+#define SAMPLING_INTERVAL_S 0.02 // in s
 // for convenience
 using nlohmann::json;
 using std::string;
@@ -69,7 +69,6 @@ int main() {
     if (length && length > 2 && data[0] == '4' && data[1] == '2') {
 	  // configuration
 	  int lane = 1; // target line
-	  double targetSpeed = MAX_SPEED_MS;
 	  double sparsePointSpacing = 30.0;
 	  int sparsePointNum = 3;
 	  int desiredPatchLength = 50;
@@ -105,6 +104,7 @@ int main() {
 			auto prevSize = previous_path_x.size();
 			json msgJson;
 			double ourS; // Where we are going to be
+			double targetSpeed = car_speed;
 			if (prevSize > 0)
 			{
 				ourS = end_path_s;
@@ -114,6 +114,7 @@ int main() {
 				ourS = car_s;
 			}
 			bool carFound = false;
+			double maxSpeedInc = MAX_ACC_MS2 * SAMPLING_INTERVAL_S;
 			for (int i = 0; i < sensor_fusion.size(); i++)
 			{
 				// check if car is in my lane
@@ -125,20 +126,31 @@ int main() {
 					double checkCarSpeed = sqrt(vx*vx + vy * vy);
 					double checkCarS = sensor_fusion[i][5];
 					// project the car possition to the end of out path 
-					checkCarS += prevSize * checkCarSpeed * 0.02; 
+					checkCarS += prevSize * checkCarSpeed * SAMPLING_INTERVAL_S;
 					// Check if car will be in front and closer than 30m
 					if (checkCarS > ourS && (checkCarS - ourS) < carMinDist)
 					{
 						carFound = true;
-						targetSpeed = checkCarSpeed;
-					}
+						if (targetSpeed - checkCarSpeed > maxSpeedInc)
+						{
+							std::cout << "speedDec";
+							targetSpeed -= maxSpeedInc;
+						}
+						else
+						{
+							std::cout << "speedEQ";
+							targetSpeed = checkCarSpeed;
+					    }
+				    }
+					
 				}
 			}
-			if (!carFound)
+			if (!carFound && (targetSpeed+maxSpeedInc) <= MAX_SPEED_MS)
 			{
-				targetSpeed = MAX_SPEED_MS;
+				std::cout << "speedInc";
+				targetSpeed += maxSpeedInc;
 			}
-
+			std::cout << "Target speed:" << targetSpeed << std::endl;
 
 
 			//Desired car position spaced at 30m
@@ -206,7 +218,7 @@ int main() {
 		  double targetX = 30.0;
 		  double targetY = s(targetX);
 		  double targetDist = sqrt(targetX * targetX + targetY * targetY);
-		  double Xinc = (targetX * targetSpeed * 0.02) / targetDist;
+		  double Xinc = (targetX * targetSpeed * SAMPLING_INTERVAL_S) / targetDist;
 		  for (int i = 1; i <= (desiredPatchLength - prevSize); ++i)
 		  {
 			  double xPoint = i * Xinc;
@@ -222,7 +234,6 @@ int main() {
 			  next_x_vals.push_back(xPoint);
 			  next_y_vals.push_back(yPoint);
 		  }
-
           /**
            * TODO: define a path made up of (x,y) points that the car will visit
            *   sequentially every .02 seconds
