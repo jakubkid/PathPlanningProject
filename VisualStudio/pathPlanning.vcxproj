@@ -24,6 +24,7 @@
   <ItemGroup>
     <ClInclude Include="..\src\json.hpp" />
     <ClInclude Include="..\src\helpers.h" />
+    <ClInclude Include="..\src\spline.h" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <ProjectGuid>{3AF50D53-A0F3-41A7-A886-77E743E73B91}</ProjectGuid>

@@ -50,8 +50,7 @@ int main() {
     map_waypoints_dx.push_back(d_x);
     map_waypoints_dy.push_back(d_y);
   }
-  int line = 1;
-  double targetSpeed = 49.99;
+
 
   h.onMessage([&map_waypoints_x,&map_waypoints_y,&map_waypoints_s,
                &map_waypoints_dx,&map_waypoints_dy]
@@ -66,7 +65,12 @@ int main() {
     // The 4 signifies a websocket message
     // The 2 signifies a websocket event
     if (length && length > 2 && data[0] == '4' && data[1] == '2') {
-
+	  // configuration
+	  int lane = 1; // target line
+	  double targetSpeed = 49.8;
+	  double sparsePointSpacing = 30.0;
+	  int sparsePointNum = 3;
+	  int desiredPatchLength = 50;
       auto s = hasData(data);
 
       if (s != "") {
@@ -74,63 +78,131 @@ int main() {
         
         string event = j[0].get<string>();
         
-        if (event == "telemetry") {
-          // j[1] is the data JSON object
-          
-          // Main car's localization Data
-          double car_x = j[1]["x"];
-          double car_y = j[1]["y"];
-          double car_s = j[1]["s"];
-          double car_d = j[1]["d"];
-          double car_yaw = j[1]["yaw"];
-          double car_speed = j[1]["speed"];
+		if (event == "telemetry") {
+			// j[1] is the data JSON object
 
-          // Previous path data given to the Planner
-          auto previous_path_x = j[1]["previous_path_x"];
-          auto previous_path_y = j[1]["previous_path_y"];
-          // Previous path's end s and d values 
-          double end_path_s = j[1]["end_path_s"];
-          double end_path_d = j[1]["end_path_d"];
+			// Main car's localization Data
+			double car_x = j[1]["x"];
+			double car_y = j[1]["y"];
+			double car_s = j[1]["s"];
+			double car_d = j[1]["d"];
+			double car_yaw = j[1]["yaw"];
+			double car_speed = j[1]["speed"];
 
-          // Sensor Fusion Data, a list of all other cars on the same side 
-          //   of the road.
-          auto sensor_fusion = j[1]["sensor_fusion"];
+			// Previous path data given to the Planner
+			auto previous_path_x = j[1]["previous_path_x"];
+			auto previous_path_y = j[1]["previous_path_y"];
+			// Previous path's end s and d values 
+			double end_path_s = j[1]["end_path_s"];
+			double end_path_d = j[1]["end_path_d"];
 
-          json msgJson;
-		  auto prevSize = previous_path_x.size();
-		  //Desired car position spaced at 30m
-		  vector<double> sparsePosX;
-		  vector<double> sparsePosY;
+			// Sensor Fusion Data, a list of all other cars on the same side 
+			//   of the road.
+			auto sensor_fusion = j[1]["sensor_fusion"];
 
-		  //car postion will be a new refference
-		  double refX = car_x;
-		  double refY = car_y;
-		  double ref_yaw = deg2rad(car_yaw);
-		  if (prevSize < 2)
-		  {
-			  double prevCarX = refX - cos(ref_yaw) * car_speed;
-			  double prevCarY = refY - sin(ref_yaw) * car_speed;
-		  }
+			json msgJson;
+			auto prevSize = previous_path_x.size();
+			//Desired car position spaced at 30m
+			vector<double> sparsePosX;
+			vector<double> sparsePosY;
 
+			//car postion will be a new refference
+			double refX;
+			double refY;
+			double refYaw;
+			double prevRefX;
+			double prevRefY;
+			if (prevSize < 2)
+			{
+				// Not enougth points use current car possition and heading
+				refX = car_x;
+				refY = car_y;
+				refYaw = deg2rad(car_yaw);
+				prevRefX = refX - cos(refYaw);
+				prevRefY = refY - sin(refYaw);
+			}
+			else
+			{
+				//Use last patch points as strating point
+				refX = previous_path_x[prevSize - 1];
+				refY = previous_path_y[prevSize - 1];
+				prevRefX = previous_path_x[prevSize - 2];
+				prevRefY = previous_path_y[prevSize - 2];
+				refYaw = atan2(refY - prevRefY, refX - prevRefX);
+			}
+			sparsePosX.push_back(prevRefX);
+			sparsePosX.push_back(refX);
+			sparsePosY.push_back(prevRefY);
+			sparsePosY.push_back(refY);
+			// add 3 points apaced 30m appart in the middle of the road for the fit
+			for (int i = 1; i <= sparsePointNum; i++)
+			{
+				vector<double> point = getXY(car_s + i * sparsePointSpacing, 2 + 4 * lane, map_waypoints_s, map_waypoints_x, map_waypoints_y);
+				sparsePosX.push_back(point[0]);
+				sparsePosY.push_back(point[1]);
+			}
+			// Shift and rotate sparse points to (0,0) and 0'C
+			for (int i = 0; i < sparsePosX.size(); i++)
+			{
+				double distX = sparsePosX[i] - refX;
+				double distY = sparsePosY[i] - refY;
+				sparsePosX[i] = distX * cos(-refYaw) - distY * sin(-refYaw);
+				sparsePosY[i] = distX * sin(-refYaw) + distY * cos(-refYaw);
+			}
+			// fit the spline 
+			tk::spline s;
 
+			
+		  s.set_points(sparsePosX, sparsePosY);
+
+		  // new path points including not used points from previous path
           vector<double> next_x_vals;
           vector<double> next_y_vals;
-		  double dist_inc = 0.5;
-		  for (int i = 0; i < 50; ++i) 
+		  for (int i = 0; i < prevSize; ++i)
 		  {
-			  double nextS = car_s + (i + 1.0)*dist_inc;
-			  double nextD = 6.0; // middle line
-			  vector<double> xyVect = getXY(nextS, nextD, map_waypoints_s, map_waypoints_x, map_waypoints_y);
-			  next_x_vals.push_back(xyVect[0]);
-			  next_y_vals.push_back(xyVect[1]);
+			  next_x_vals.push_back(previous_path_x[i]);
+			  next_y_vals.push_back(previous_path_y[i]);
 		  }
+		  // Linearize spline on 30m
+		  double targetX = 30.0;
+		  double targetY = s(targetX);
+		  double targetDist = sqrt(targetX * targetX + targetY * targetY);
+		  // 0.44704 transformes miles/h to m/s
+		  double Xinc = (targetX * targetSpeed * 0.44704 * 0.02) / targetDist;
+		  for (int i = 1; i <= (desiredPatchLength - prevSize); ++i)
+		  {
+			  double xPoint = i * Xinc;
+			  double yPoint = s(xPoint);
+			  double xTemp = xPoint;
+			  double yTemp = yPoint; 
+			  // roteate it back to original refference 
+			  xPoint = xTemp * cos(refYaw) - yTemp * sin(refYaw);
+			  yPoint = xTemp * sin(refYaw) + yTemp * cos(refYaw);
+
+			  xPoint += refX;
+			  yPoint += refY;
+			  next_x_vals.push_back(xPoint);
+			  next_y_vals.push_back(yPoint);
+		  }
+
           /**
            * TODO: define a path made up of (x,y) points that the car will visit
            *   sequentially every .02 seconds
            */
+		  /*
+		  std::cout << "PrevSize: " << prevSize;
+		  for (int i = 0; i < next_x_vals.size(); i++)
+		  {
+			  std::cout << "points " << i << "[" << next_x_vals[i] << ", " << next_y_vals[i] << "]" << std::endl;
+			  if (i > 0)
+			  {
+				  double x = next_x_vals[i] - next_x_vals[i - 1];
+				  double y = next_y_vals[i] - next_y_vals[i - 1];
+				  std::cout << "speed: " << sqrt(x*x + y * y) / (0.02 * 0.44704) << std::endl;
+			  }
 
-
-
+		  }
+		  */
           msgJson["next_x"] = next_x_vals;
           msgJson["next_y"] = next_y_vals;
 

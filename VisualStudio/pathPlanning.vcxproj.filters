@@ -12,15 +12,13 @@
     <ClCompile Include="..\src\main.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="..\src\PID.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\src\json.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\src\PID.h">
+    <ClInclude Include="..\src\helpers.h" />
+    <ClInclude Include="..\src\spline.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
