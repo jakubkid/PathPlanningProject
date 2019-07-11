@@ -11,6 +11,13 @@
 #define MAX_SPEED_MS 22.3 // 22.3m/s ~50mph
 #define MAX_ACC_MS2 9.5
 #define SAMPLING_INTERVAL_S 0.02 // in s
+#define SPEED_HIST_MS 0.5
+#define SPARSE_POINT_SPACING 30.0
+#define SPARSE_POINT_NUM 3
+#define DESIRED_PATCH_LEGTH 50
+#define CAR_MIN_DIST 15.0
+#define CAR_FOLLOW_DIST 20.0
+#define CAR_BREAK_DIST 25.0
 // for convenience
 using nlohmann::json;
 using std::string;
@@ -69,10 +76,7 @@ int main() {
     if (length && length > 2 && data[0] == '4' && data[1] == '2') {
 	  // configuration
 	  int lane = 1; // target line
-	  double sparsePointSpacing = 30.0;
-	  int sparsePointNum = 3;
-	  int desiredPatchLength = 50;
-	  double carMinDist = 30.0;
+
       auto s = hasData(data);
 
       if (s != "") {
@@ -104,7 +108,8 @@ int main() {
 			auto prevSize = previous_path_x.size();
 			json msgJson;
 			double ourS; // Where we are going to be
-			double targetSpeed = car_speed;
+			double targetSpeed = 0;
+
 			if (prevSize > 0)
 			{
 				ourS = end_path_s;
@@ -114,7 +119,6 @@ int main() {
 				ourS = car_s;
 			}
 			bool carFound = false;
-			double maxSpeedInc = MAX_ACC_MS2 * SAMPLING_INTERVAL_S;
 			for (int i = 0; i < sensor_fusion.size(); i++)
 			{
 				// check if car is in my lane
@@ -128,27 +132,31 @@ int main() {
 					// project the car possition to the end of out path 
 					checkCarS += prevSize * checkCarSpeed * SAMPLING_INTERVAL_S;
 					// Check if car will be in front and closer than 30m
-					if (checkCarS > ourS && (checkCarS - ourS) < carMinDist)
+					double carDist = (checkCarS - ourS);
+					if (checkCarS > ourS && carDist < CAR_BREAK_DIST)
 					{
-						carFound = true;
-						if (targetSpeed - checkCarSpeed > maxSpeedInc)
+						if (carDist < CAR_MIN_DIST)
 						{
-							std::cout << "speedDec";
-							targetSpeed -= maxSpeedInc;
+							targetSpeed = 0.9 * checkCarSpeed- SPEED_HIST_MS;
+						}
+						else if (carDist < CAR_FOLLOW_DIST)
+						{
+							targetSpeed = checkCarSpeed;
 						}
 						else
 						{
-							std::cout << "speedEQ";
-							targetSpeed = checkCarSpeed;
-					    }
+							targetSpeed = checkCarSpeed + SPEED_HIST_MS;
+						}
+						carFound = true;
+						
 				    }
 					
 				}
 			}
-			if (!carFound && (targetSpeed+maxSpeedInc) <= MAX_SPEED_MS)
+			if (!carFound)
 			{
 				std::cout << "speedInc";
-				targetSpeed += maxSpeedInc;
+				targetSpeed = MAX_SPEED_MS;
 			}
 			std::cout << "Target speed:" << targetSpeed << std::endl;
 
@@ -186,9 +194,9 @@ int main() {
 			sparsePosY.push_back(prevRefY);
 			sparsePosY.push_back(refY);
 			// add 3 points apaced 30m appart in the middle of the road for the fit
-			for (int i = 1; i <= sparsePointNum; i++)
+			for (int i = 1; i <= SPARSE_POINT_NUM; i++)
 			{
-				vector<double> point = getXY(car_s + i * sparsePointSpacing, 2 + 4 * lane, map_waypoints_s, map_waypoints_x, map_waypoints_y);
+				vector<double> point = getXY(ourS + i * SPARSE_POINT_SPACING, 2 + 4 * lane, map_waypoints_s, map_waypoints_x, map_waypoints_y);
 				sparsePosX.push_back(point[0]);
 				sparsePosY.push_back(point[1]);
 			}
@@ -203,7 +211,10 @@ int main() {
 			// fit the spline 
 			tk::spline s;
 
-			
+		  for (int i = 0; i < sparsePosX.size(); i++)
+		  {
+			  std::cout << "sp " << i << ": [" << sparsePosX[i] << ", " << sparsePosY[i] << "]" << std::endl;
+		  }
 		  s.set_points(sparsePosX, sparsePosY);
 
 		  // new path points including not used points from previous path
@@ -218,10 +229,37 @@ int main() {
 		  double targetX = 30.0;
 		  double targetY = s(targetX);
 		  double targetDist = sqrt(targetX * targetX + targetY * targetY);
-		  double Xinc = (targetX * targetSpeed * SAMPLING_INTERVAL_S) / targetDist;
-		  for (int i = 1; i <= (desiredPatchLength - prevSize); ++i)
+		  double speedInc = MAX_ACC_MS2 * SAMPLING_INTERVAL_S;
+		  double xPointPrev = 0;
+		  double curSpeed;
+		  if (next_x_vals.size() > 2)
 		  {
-			  double xPoint = i * Xinc;
+			  double xdiff = next_x_vals[next_x_vals.size() - 2] - next_x_vals[next_x_vals.size() - 1];
+			  double ydiff = next_y_vals[next_y_vals.size() - 2] - next_y_vals[next_y_vals.size() - 1];
+			  curSpeed = sqrt(xdiff*xdiff + ydiff * ydiff) / SAMPLING_INTERVAL_S;
+		  }
+		  else
+		  {
+			  curSpeed = car_speed / 2.23694; // car speed converted to m/s
+		  }
+		  for (int i = 1; i <= (DESIRED_PATCH_LEGTH - prevSize); ++i)
+		  {	
+			  double speedDiff = curSpeed - targetSpeed;
+			  if (abs(speedDiff) > SPEED_HIST_MS)
+			  {
+				  if (curSpeed < (targetSpeed - speedInc))
+				  {
+					  curSpeed += speedInc;
+				  }
+				  if (curSpeed > (targetSpeed + speedInc))
+				  {
+					  curSpeed -= speedInc;
+				  }
+			  }
+			  double Xinc = (targetX * curSpeed * SAMPLING_INTERVAL_S) / targetDist;
+
+			  xPointPrev = xPointPrev + Xinc;
+			  double xPoint = xPointPrev;
 			  double yPoint = s(xPoint);
 			  double xTemp = xPoint;
 			  double yTemp = yPoint; 
