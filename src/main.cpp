@@ -8,7 +8,9 @@
 #include "helpers.h"
 #include "json.hpp"
 #include "spline.h"
-
+#define MAX_SPEED_MS 22.3 // 22.3m/s ~50mph
+#define MAX_ACC_MS2 9.5
+#define MAX_JERK_MS3 9.5 
 // for convenience
 using nlohmann::json;
 using std::string;
@@ -67,10 +69,11 @@ int main() {
     if (length && length > 2 && data[0] == '4' && data[1] == '2') {
 	  // configuration
 	  int lane = 1; // target line
-	  double targetSpeed = 49.8;
+	  double targetSpeed = MAX_SPEED_MS;
 	  double sparsePointSpacing = 30.0;
 	  int sparsePointNum = 3;
 	  int desiredPatchLength = 50;
+	  double carMinDist = 30.0;
       auto s = hasData(data);
 
       if (s != "") {
@@ -99,9 +102,45 @@ int main() {
 			// Sensor Fusion Data, a list of all other cars on the same side 
 			//   of the road.
 			auto sensor_fusion = j[1]["sensor_fusion"];
-
-			json msgJson;
 			auto prevSize = previous_path_x.size();
+			json msgJson;
+			double ourS; // Where we are going to be
+			if (prevSize > 0)
+			{
+				ourS = end_path_s;
+			}
+			else
+			{
+				ourS = car_s;
+			}
+			bool carFound = false;
+			for (int i = 0; i < sensor_fusion.size(); i++)
+			{
+				// check if car is in my lane
+				double d = sensor_fusion[i][6];
+				if (d > (4 * lane) && d < (4 * (lane + 1)))
+				{
+					double vx = sensor_fusion[i][3];
+					double vy = sensor_fusion[i][4];
+					double checkCarSpeed = sqrt(vx*vx + vy * vy);
+					double checkCarS = sensor_fusion[i][5];
+					// project the car possition to the end of out path 
+					checkCarS += prevSize * checkCarSpeed * 0.02; 
+					// Check if car will be in front and closer than 30m
+					if (checkCarS > ourS && (checkCarS - ourS) < carMinDist)
+					{
+						carFound = true;
+						targetSpeed = checkCarSpeed;
+					}
+				}
+			}
+			if (!carFound)
+			{
+				targetSpeed = MAX_SPEED_MS;
+			}
+
+
+
 			//Desired car position spaced at 30m
 			vector<double> sparsePosX;
 			vector<double> sparsePosY;
@@ -167,8 +206,7 @@ int main() {
 		  double targetX = 30.0;
 		  double targetY = s(targetX);
 		  double targetDist = sqrt(targetX * targetX + targetY * targetY);
-		  // 0.44704 transformes miles/h to m/s
-		  double Xinc = (targetX * targetSpeed * 0.44704 * 0.02) / targetDist;
+		  double Xinc = (targetX * targetSpeed * 0.02) / targetDist;
 		  for (int i = 1; i <= (desiredPatchLength - prevSize); ++i)
 		  {
 			  double xPoint = i * Xinc;
@@ -189,20 +227,6 @@ int main() {
            * TODO: define a path made up of (x,y) points that the car will visit
            *   sequentially every .02 seconds
            */
-		  /*
-		  std::cout << "PrevSize: " << prevSize;
-		  for (int i = 0; i < next_x_vals.size(); i++)
-		  {
-			  std::cout << "points " << i << "[" << next_x_vals[i] << ", " << next_y_vals[i] << "]" << std::endl;
-			  if (i > 0)
-			  {
-				  double x = next_x_vals[i] - next_x_vals[i - 1];
-				  double y = next_y_vals[i] - next_y_vals[i - 1];
-				  std::cout << "speed: " << sqrt(x*x + y * y) / (0.02 * 0.44704) << std::endl;
-			  }
-
-		  }
-		  */
           msgJson["next_x"] = next_x_vals;
           msgJson["next_y"] = next_y_vals;
 
