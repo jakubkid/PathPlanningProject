@@ -11,7 +11,7 @@
 #define MAX_SPEED_MS 22.3 // 22.3m/s ~50mph
 #define MAX_ACC_MS2 9.5
 #define SAMPLING_INTERVAL_S 0.02 // in s
-#define SPEED_HIST_MS 0.5
+#define SPEED_HIST_MS 0.2
 #define SPARSE_POINT_SPACING 30.0
 #define SPARSE_POINT_NUM 3
 #define DESIRED_PATCH_LEGTH 50
@@ -255,6 +255,10 @@ int main() {
 				  {
 					  curSpeed -= speedInc;
 				  }
+			  }
+			  else
+			  {
+				  curSpeed = targetSpeed;
 			  }
 			  double Xinc = (targetX * curSpeed * SAMPLING_INTERVAL_S) / targetDist;
 
