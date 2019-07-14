@@ -15,9 +15,15 @@
 #define SPARSE_POINT_SPACING 30.0
 #define SPARSE_POINT_NUM 3
 #define DESIRED_PATCH_LEGTH 50
-#define CAR_MIN_DIST 15.0
-#define CAR_FOLLOW_DIST 20.0
-#define CAR_BREAK_DIST 25.0
+#define CAR_MIN_DIST 10.0       // minimum distance to the car
+#define CAR_FOLLOW_DIST 25.0    // distance where we should follow
+#define CAR_BREAK_DIST 30.0     // Distance where we should start breaking
+#define CAR_AVOID_DIST 40.0     // Distance where we should start overtaking the car
+#define CAR_OVERTAKE_DIST 130.0 // Distance needed to overtake another car
+#define LINE_NUM 3
+#define LINE_WIDTH 4.0
+#define SPEED_THRESHOLD_MS 2.0 // only change line when speed difference is higher than 2m/s
+#define TIME_FOR_LINE_CHANGE_S 10 // time needed for line change  
 // for convenience
 using nlohmann::json;
 using std::string;
@@ -75,7 +81,7 @@ int main() {
     // The 2 signifies a websocket event
     if (length && length > 2 && data[0] == '4' && data[1] == '2') {
 	  // configuration
-	  int lane = 1; // target line
+
 
       auto s = hasData(data);
 
@@ -108,8 +114,10 @@ int main() {
 			auto prevSize = previous_path_x.size();
 			json msgJson;
 			double ourS; // Where we are going to be
-			double targetSpeed = 0;
-
+			double targetSpeed = MAX_SPEED_MS; // target speed
+			int currentLine = (int)(car_d / LINE_WIDTH); // current line
+			int targetLine = currentLine; // target line (right when no cars detected)
+			double carSpeedMs = car_speed * 0.44704;
 			if (prevSize > 0)
 			{
 				ourS = end_path_s;
@@ -118,48 +126,138 @@ int main() {
 			{
 				ourS = car_s;
 			}
-			bool carFound = false;
+
+			double procCarSpeed[LINE_NUM]; // speed of car infront per line
+			double trailingCarSpeed[LINE_NUM]; // speed of trailing car per line
+			double procCarDist[LINE_NUM]; // Distance to proceeding car per line
+			double trailingCarDist[LINE_NUM]; // DIstance to trailing car per line
+			bool procCarFoundLine[LINE_NUM] = { false }; // Car found in front per line
+			bool trailingCarFoundLine[LINE_NUM] = { false }; // Car found in the back per line
+
 			for (int i = 0; i < sensor_fusion.size(); i++)
 			{
 				// check if car is in my lane
 				double d = sensor_fusion[i][6];
-				if (d > (4 * lane) && d < (4 * (lane + 1)))
+				double vx = sensor_fusion[i][3];
+				double vy = sensor_fusion[i][4];
+				double checkCarSpeed = sqrt(vx*vx + vy * vy);
+				double checkCarS = sensor_fusion[i][5];
+				// project the car possition to the end of out path 
+				checkCarS += prevSize * checkCarSpeed * SAMPLING_INTERVAL_S;
+				double carDist = (checkCarS - ourS);
+				int checkCarLaneNum = (int)(d / LINE_WIDTH);
+				if (carDist >= 0)
 				{
-					double vx = sensor_fusion[i][3];
-					double vy = sensor_fusion[i][4];
-					double checkCarSpeed = sqrt(vx*vx + vy * vy);
-					double checkCarS = sensor_fusion[i][5];
-					// project the car possition to the end of out path 
-					checkCarS += prevSize * checkCarSpeed * SAMPLING_INTERVAL_S;
-					// Check if car will be in front and closer than 30m
-					double carDist = (checkCarS - ourS);
-					if (checkCarS > ourS && carDist < CAR_BREAK_DIST)
+					if (!procCarFoundLine[checkCarLaneNum] || (carDist < procCarDist[checkCarLaneNum]))
 					{
-						if (carDist < CAR_MIN_DIST)
+						procCarDist[checkCarLaneNum] = carDist;
+						procCarSpeed[checkCarLaneNum] = checkCarSpeed > MAX_SPEED_MS? MAX_SPEED_MS : checkCarSpeed;
+						procCarFoundLine[checkCarLaneNum] = true;
+					}
+				}
+				else
+				{
+					carDist = -carDist;
+					if (!trailingCarFoundLine[checkCarLaneNum] || (carDist < trailingCarDist[checkCarLaneNum]))
+					{
+						trailingCarDist[checkCarLaneNum] = carDist;
+						trailingCarSpeed[checkCarLaneNum] = checkCarSpeed;
+						trailingCarFoundLine[checkCarLaneNum] = true;
+					}
+				}			
+
+				double maxLineSpeed =( procCarFoundLine[currentLine] ? procCarSpeed[currentLine]: MAX_SPEED_MS);
+
+				// check only left and right line
+				for (int checkLine = currentLine + 1; checkLine >= currentLine - 1; checkLine -= 2)
+				{
+					if (checkLine >= LINE_NUM || checkLine < 0)
+					{
+						continue;
+					}
+					double trailingSpeedDiff = trailingCarSpeed[checkLine] - carSpeedMs;
+					// Check trailling car
+					if (!trailingCarFoundLine[checkLine] ||
+						(trailingCarDist[checkLine] > CAR_BREAK_DIST) && (trailingSpeedDiff < 0 || ((trailingCarDist[checkLine] / trailingSpeedDiff) > TIME_FOR_LINE_CHANGE_S)))
+					{
+						double procSpeedDiff = procCarSpeed[checkLine] - carSpeedMs;
+						//check leading car
+						if (!procCarFoundLine[checkLine] ||
+							(procSpeedDiff > SPEED_THRESHOLD_MS && procCarDist[checkLine] > CAR_BREAK_DIST) ||
+							procSpeedDiff <= SPEED_THRESHOLD_MS && procCarDist[checkLine] > CAR_OVERTAKE_DIST)
 						{
-							targetSpeed = 0.9 * checkCarSpeed- SPEED_HIST_MS;
+							double procSpeed = (procCarFoundLine[checkLine] ? procCarSpeed[checkLine] : MAX_SPEED_MS);
+							// preffer going right
+							if (checkLine > currentLine)
+							{
+
+								std::cout << "Change right procCarFoundLine[checkLine]:" << procCarFoundLine[checkLine] << " procSpeedDiff: " << procSpeedDiff << " procCarDist[checkLine]: " << procCarDist[checkLine] << std::endl;
+								for (int i = 0; i < LINE_NUM; i++)
+								{
+									std::cout << i << " procCarFoundLine: " << procCarFoundLine[i] << " procCarDist: " << procCarDist[i] << std::endl;
+									std::cout << i << " trailingCarFoundLine: " << trailingCarFoundLine[i] << " trailingCarDist: " << trailingCarDist[i] << std::endl;
+								}
+								maxLineSpeed = procSpeed;
+								targetLine = checkLine;
+								break;
+							}
+							else
+							{
+								if (procCarFoundLine[currentLine] && procCarDist[currentLine] < CAR_AVOID_DIST)
+								{
+									std::cout << "Change left procCarDist curr:" << procCarDist[currentLine] << "procCarFoundLine[checkLine]" << procCarFoundLine[checkLine] << " procSpeedDiff: " << procSpeedDiff<< " procCarDist[checkLine]: "<< procCarDist[checkLine] <<  std::endl;
+									for (int i = 0; i < LINE_NUM; i++)
+									{
+										std::cout << i << " procCarFoundLine: " << procCarFoundLine[i] << " procCarDist: " << procCarDist[i] << std::endl;
+										std::cout << i << " trailingCarFoundLine: " << trailingCarFoundLine[i] << " trailingCarDist: " << trailingCarDist[i] << std::endl;
+									}
+									maxLineSpeed = procSpeed;
+									targetLine = checkLine;
+								}
+							}
 						}
-						else if (carDist < CAR_FOLLOW_DIST)
+					}
+				}
+
+				// check for colision in current line
+				if (procCarFoundLine[currentLine] )
+				{
+					if (procCarDist[currentLine] < CAR_MIN_DIST)
+					{
+						targetSpeed = 0.9 * procCarSpeed[currentLine] - SPEED_HIST_MS;
+					}
+					else if(currentLine == targetLine)
+					{
+						if (procCarDist[currentLine] < CAR_FOLLOW_DIST)
 						{
-							targetSpeed = checkCarSpeed;
+							targetSpeed = procCarSpeed[currentLine];
 						}
-						else
+						else if (procCarDist[currentLine] < CAR_BREAK_DIST)
 						{
-							targetSpeed = checkCarSpeed + SPEED_HIST_MS;
+							targetSpeed = procCarSpeed[currentLine] + SPEED_HIST_MS;
 						}
-						carFound = true;
-						
-				    }
-					
+					}
+				}
+				// check for collision on target line
+				if (currentLine != targetLine && procCarFoundLine[targetLine])
+				{
+					if (procCarDist[targetLine] < CAR_MIN_DIST)
+					{
+						targetSpeed = 0.9 * procCarSpeed[targetLine] - SPEED_HIST_MS;
+					}
+					else if (procCarDist[targetLine] < CAR_FOLLOW_DIST)
+					{
+						targetSpeed = procCarSpeed[targetLine];
+					}
+					else if (procCarDist[targetLine] < CAR_BREAK_DIST)
+					{
+						targetSpeed = procCarSpeed[targetLine] + SPEED_HIST_MS;
+					}
 				}
 			}
-			if (!carFound)
-			{
-				std::cout << "speedInc";
-				targetSpeed = MAX_SPEED_MS;
-			}
+			std::cout << "Current line:" << currentLine << std::endl;
 			std::cout << "Target speed:" << targetSpeed << std::endl;
-
+			std::cout << "Target line:" << targetLine << std::endl<< std::endl<< std::endl;
 
 			//Desired car position spaced at 30m
 			vector<double> sparsePosX;
@@ -196,7 +294,7 @@ int main() {
 			// add 3 points apaced 30m appart in the middle of the road for the fit
 			for (int i = 1; i <= SPARSE_POINT_NUM; i++)
 			{
-				vector<double> point = getXY(ourS + i * SPARSE_POINT_SPACING, 2 + 4 * lane, map_waypoints_s, map_waypoints_x, map_waypoints_y);
+				vector<double> point = getXY(ourS + i * SPARSE_POINT_SPACING, 2 + LINE_WIDTH * targetLine, map_waypoints_s, map_waypoints_x, map_waypoints_y);
 				sparsePosX.push_back(point[0]);
 				sparsePosY.push_back(point[1]);
 			}
@@ -210,11 +308,12 @@ int main() {
 			}
 			// fit the spline 
 			tk::spline s;
-
+/*
 		  for (int i = 0; i < sparsePosX.size(); i++)
 		  {
 			  std::cout << "sp " << i << ": [" << sparsePosX[i] << ", " << sparsePosY[i] << "]" << std::endl;
 		  }
+ */
 		  s.set_points(sparsePosX, sparsePosY);
 
 		  // new path points including not used points from previous path
