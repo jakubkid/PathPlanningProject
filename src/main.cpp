@@ -8,32 +8,33 @@
 #include "helpers.h"
 #include "json.hpp"
 #include "spline.h"
-#define PRINT_DEBUG  // print debug
-#define MAX_SPEED_MS 22.3 // 22.3m/s ~50mph
-#define MAX_ACC_MS2 7.0
-#define SAMPLING_INTERVAL_S 0.02 // in s
-#define SPEED_HIST_MS 0.2
-#define SPARSE_POINT_SPACING 30.0
-#define SPARSE_POINT_NUM 3
-#define DESIRED_PATCH_LEGTH 30
-#define CHANGE_MIN_DIST 5.0     // minimum distance to the car in line change
-#define CAR_MIN_DIST 10.0       // minimum distance to the car
-#define CAR_FOLLOW_DIST 20.0    // distance where we should follow
-#define CAR_BREAK_DIST 25.0     // Distance where we should start breaking
-#define CAR_AVOID_DIST 40.0     // Distance where we should start overtaking the car
-#define CAR_OVERTAKE_DIST 45.0 // Distance needed to overtake another car
-#define LINE_NUM 3
-#define LINE_WIDTH 4.0
-#define SPEED_THRESHOLD_MS 2.0 // only change line when speed difference is higher than 2m/s
-#define TIME_FOR_LINE_CHANGE_S 3 // time needed for line change
+//#define PRINT_DEBUG             // uncomment to print debug info
+#define LINE_NUM 3                // Number of lines
+#define LINE_WIDTH 4.0            // Line witdth in m
+#define SAMPLING_INTERVAL_S 0.02  // sampling interval in s
+#define MAX_SPEED_MS 22.3         // maximum speed 22.3m/s ~50mph
+#define MAX_ACC_MS2 7.0           // Maximum allowed acceleration in m/s2
+#define SPEED_HIST_MS 0.2         // speed histeresis to avoid constant speed changes  in m/s
+#define SPARSE_POINT_SPACING 30.0 // Spacing of sparse points in m
+#define SPARSE_POINT_NUM 3        // number of Sparse points
+#define DESIRED_PATCH_LEGTH 30    // number of points in patch for simulator
+#define CHANGE_MIN_DIST 5.0       // minimum distance to the car in line change in m
+#define CAR_MIN_DIST 15.0         // minimum distance to the car in m
+#define CAR_FOLLOW_DIST 25.0      // distance where we should follow in m
+#define CAR_BREAK_DIST 30.0       // Distance where we should start breaking in m
+#define CAR_AVOID_DIST 40.0       // Distance where we should start overtaking the car in m
+#define CAR_OVERTAKE_DIST 45.0    // Distance needed to overtake another car in m
+#define SPEED_THRESHOLD_MS 2.0    // Threshold when it is worth to change the line in m/s
+#define TIME_FOR_LINE_CHANGE_S 3  // Minimum time needed for line change in s
 // for convenience
 using nlohmann::json;
 using std::string;
 using std::vector;
 
+//check if it is safe to change the line
 bool checkIfChangeIsSafe(int curLine, int destLine,double carSpeedMs,
-	                     bool *trailingCarFoundLine, double *trailingCarSpeed, double *trailingCarDist,
-					     bool *procCarFoundLine, double *procCarSpeed, double *procCarDist)
+	                     bool *trailingCarFound, double *trailingCarSpeed, double *trailingCarDist,
+					     bool *procCarFound, double *procCarSpeed, double *procCarDist)
 {
 	if (curLine == destLine)
 	{
@@ -43,30 +44,25 @@ bool checkIfChangeIsSafe(int curLine, int destLine,double carSpeedMs,
 	destLine += inc;
 	for (int checkLine = curLine + inc; checkLine != destLine; checkLine += inc)
 	{
-		/*
-		if (collisionFoundLine[checkLine])
-		{
-
-		}*/
 		double trailingSpeedDiff = trailingCarSpeed[checkLine] - carSpeedMs;
 		// Check trailling car
-		if (trailingCarFoundLine[checkLine] &&
+		if (trailingCarFound[checkLine] &&
 		   ((trailingCarDist[checkLine] < CHANGE_MIN_DIST) || (trailingSpeedDiff > 0 && ((trailingCarDist[checkLine] / trailingSpeedDiff) < TIME_FOR_LINE_CHANGE_S))))
 		{
 #ifdef PRINT_DEBUG
 			std::cout << "Trail car on " << checkLine << " found " << curLine << "->" << (destLine - inc) << " rejected" << std::endl;
-			std::cout << "trailingCarFoundLine[checkLine] " << trailingCarFoundLine[checkLine] << " speedDiff " << trailingSpeedDiff << " trailingCarDist[checkLine] " << trailingCarDist[checkLine] <<  std::endl;
+			std::cout << "trailingCarFoundLine[checkLine] " << trailingCarFound[checkLine] << " speedDiff " << trailingSpeedDiff << " trailingCarDist[checkLine] " << trailingCarDist[checkLine] <<  std::endl;
 #endif
 			return false;
 		}
 		double procSpeedDiff = carSpeedMs - procCarSpeed[checkLine];
 		//check leading car
-		if (procCarFoundLine[checkLine] &&
+		if (procCarFound[checkLine] &&
 		   ((procCarDist[checkLine] < CHANGE_MIN_DIST) || (procSpeedDiff > 0 && ((procCarDist[checkLine] / procSpeedDiff) < TIME_FOR_LINE_CHANGE_S))))
 		{
 #ifdef PRINT_DEBUG
 			std::cout << "Lead car on " << checkLine << " found " << curLine << "->" << (destLine - inc) << " rejected" << std::endl;
-			std::cout << "procCarFoundLine[checkLine] "<< procCarFoundLine[checkLine] << " procSpeedDiff " << procSpeedDiff << " procCarDist[checkLine] " << procCarDist[checkLine] << std::endl;
+			std::cout << "procCarFoundLine[checkLine] "<< procCarFound[checkLine] << " procSpeedDiff " << procSpeedDiff << " procCarDist[checkLine] " << procCarDist[checkLine] << std::endl;
 #endif
 			return false;
 		}
@@ -171,14 +167,15 @@ int main() {
 			{
 				ourS = car_s;
 			}
-
-			double procCarSpeed[LINE_NUM]; // speed of car infront per line
-			double trailingCarSpeed[LINE_NUM]; // speed of trailing car per line
-			double procCarDist[LINE_NUM]; // Distance to proceeding car per line
-			double trailingCarDist[LINE_NUM]; // DIstance to trailing car per line
-			bool procCarFoundLine[LINE_NUM] = { false }; // Car found in front per line
-			bool trailingCarFoundLine[LINE_NUM] = { false }; // Car found in the back per line
-			bool collisionFoundLine[LINE_NUM] = { false }; // Car is currently on collision course
+/************************************************************************************************/
+// Find proceeding and trailing car on each line
+/************************************************************************************************/
+			double procCarSpeed[LINE_NUM];                // speed of car infront per line
+			double trailingCarSpeed[LINE_NUM];            // speed of trailing car per line
+			double procCarDist[LINE_NUM];                 // Distance to proceeding car per line
+			double trailingCarDist[LINE_NUM];             // DIstance to trailing car per line
+			bool procCarFound[LINE_NUM] = { false };      // Car found in front per line
+			bool trailingCarFound[LINE_NUM] = { false };  // Car found in the back per line
 
 			for (int i = 0; i < sensor_fusion.size(); i++)
 			{
@@ -189,45 +186,42 @@ int main() {
 				double checkCarSpeed = sqrt(vx*vx + vy * vy);
 				double checkCarS = sensor_fusion[i][5];
 				int checkCarLaneNum = (int)(d / LINE_WIDTH);
-				double carDist = (checkCarS - ourS);
-				if (carDist < CAR_MIN_DIST && carDist > -CAR_MIN_DIST)
-				{
-					collisionFoundLine[checkCarLaneNum] = true;
-				}
 			    // project the car possition to the end of out path 
 				checkCarS += prevSize * checkCarSpeed * SAMPLING_INTERVAL_S;
-				carDist = (checkCarS - ourS);
+				double carDist = (checkCarS - ourS);
 
 				if (carDist >= 0)
 				{
-					if (!procCarFoundLine[checkCarLaneNum] || (carDist < procCarDist[checkCarLaneNum]))
+					if (!procCarFound[checkCarLaneNum] || (carDist < procCarDist[checkCarLaneNum]))
 					{
 						procCarDist[checkCarLaneNum] = carDist;
 						procCarSpeed[checkCarLaneNum] = checkCarSpeed > MAX_SPEED_MS ? MAX_SPEED_MS : checkCarSpeed;
-						procCarFoundLine[checkCarLaneNum] = true;
+						procCarFound[checkCarLaneNum] = true;
 					}
 				}
 				else
 				{
 					carDist = -carDist;
-					if (!trailingCarFoundLine[checkCarLaneNum] || (carDist < trailingCarDist[checkCarLaneNum]))
+					if (!trailingCarFound[checkCarLaneNum] || (carDist < trailingCarDist[checkCarLaneNum]))
 					{
 						trailingCarDist[checkCarLaneNum] = carDist;
 						trailingCarSpeed[checkCarLaneNum] = checkCarSpeed;
-						trailingCarFoundLine[checkCarLaneNum] = true;
+						trailingCarFound[checkCarLaneNum] = true;
 					}
 				}
 			}
-			
+/************************************************************************************************/
+//Calculate optimum line
+/************************************************************************************************/
 			int bestLine = -1;
 			// Find empty lines or lines with speeding cars
 			for (int checkLine = LINE_NUM - 1; checkLine >= 0; checkLine--)
 			{
-				if (!procCarFoundLine[checkLine] || procCarSpeed[checkLine] >= MAX_SPEED_MS)
+				if (!procCarFound[checkLine] || procCarSpeed[checkLine] >= MAX_SPEED_MS)
 				{
 					if (checkIfChangeIsSafe(currentLine, checkLine, carSpeedMs,
-						trailingCarFoundLine, trailingCarSpeed, trailingCarDist,
-						procCarFoundLine, procCarSpeed, procCarDist))
+						trailingCarFound, trailingCarSpeed, trailingCarDist,
+						procCarFound, procCarSpeed, procCarDist))
 					{
 						bestLine = checkLine;
 						break;
@@ -244,8 +238,8 @@ int main() {
 						((maxLineSpeed < (MAX_SPEED_MS - SPEED_THRESHOLD_MS)) && (procCarDist[checkLine] > CAR_OVERTAKE_DIST)))
 					{
 						if (checkIfChangeIsSafe(currentLine, checkLine, carSpeedMs,
-							trailingCarFoundLine, trailingCarSpeed, trailingCarDist,
-							procCarFoundLine, procCarSpeed, procCarDist))
+							trailingCarFound, trailingCarSpeed, trailingCarDist,
+							procCarFound, procCarSpeed, procCarDist))
 						{
 							maxLineSpeed = procCarSpeed[checkLine];
 							bestLine = checkLine;
@@ -263,66 +257,10 @@ int main() {
 			{
 				targetLine = currentLine;
 			}
-
-			/* Simple algorithm
-			// check only left and right line
-			for (int checkLine = currentLine + 1; checkLine >= currentLine - 1; checkLine -= 2)
-			{
-				if (checkLine >= LINE_NUM || checkLine < 0)
-				{
-					continue;
-				}
-				double trailingSpeedDiff = trailingCarSpeed[checkLine] - carSpeedMs;
-				// Check trailling car
-				if (!trailingCarFoundLine[checkLine] ||
-					(trailingCarDist[checkLine] > CAR_BREAK_DIST) && (trailingSpeedDiff < 0 || ((trailingCarDist[checkLine] / trailingSpeedDiff) > TIME_FOR_LINE_CHANGE_S)))
-				{
-					double procSpeedDiff = procCarSpeed[checkLine] - carSpeedMs;
-					//check leading car
-					if (!procCarFoundLine[checkLine] ||
-						(procSpeedDiff > SPEED_THRESHOLD_MS && procCarDist[checkLine] > CAR_BREAK_DIST) ||
-						procSpeedDiff <= SPEED_THRESHOLD_MS && procCarDist[checkLine] > CAR_OVERTAKE_DIST)
-					{
-						double procSpeed = (procCarFoundLine[checkLine] ? procCarSpeed[checkLine] : MAX_SPEED_MS);
-						// preffer going right
-						if (checkLine > currentLine)
-						{
-
-							std::cout << "Change right procCarFoundLine[checkLine]:" << procCarFoundLine[checkLine] << " procSpeedDiff: " << procSpeedDiff << " procCarDist[checkLine]: " << procCarDist[checkLine] << std::endl;
-							for (int i = 0; i < LINE_NUM; i++)
-							{
-								std::cout << i << " procCarFoundLine: " << procCarFoundLine[i] << " procCarDist: " << procCarDist[i] << std::endl;
-								std::cout << i << " trailingCarFoundLine: " << trailingCarFoundLine[i] << " trailingCarDist: " << trailingCarDist[i] << std::endl;
-							}
-							targetLine = checkLine;
-							break;
-						}
-						else
-						{
-							if (procCarFoundLine[currentLine] && procCarDist[currentLine] < CAR_AVOID_DIST)
-							{
-								std::cout << "Change left procCarDist curr:" << procCarDist[currentLine] << "procCarFoundLine[checkLine]" << procCarFoundLine[checkLine] << " procSpeedDiff: " << procSpeedDiff<< " procCarDist[checkLine]: "<< procCarDist[checkLine] <<  std::endl;
-								for (int i = 0; i < LINE_NUM; i++)
-								{
-									std::cout << i << " procCarFoundLine: " << procCarFoundLine[i] << " procCarDist: " << procCarDist[i] << std::endl;
-									std::cout << i << " trailingCarFoundLine: " << trailingCarFoundLine[i] << " trailingCarDist: " << trailingCarDist[i] << std::endl;
-								}
-								targetLine = checkLine;
-							}
-						}
-					}
-				}
-			}
-			*/
-
-			// check for colision in current line
-			/*
-			for (int checkLine = LINE_NUM - 1; checkLine >= 0; checkLine--)
-			{
-				if(abs(checkLine*LINE_WIDTH + (LINE_WIDTH / 2) - )  )
-			}*/
-
-			if (procCarFoundLine[currentLine] )
+/************************************************************************************************/
+//Adapt speed to avoid colisions
+/************************************************************************************************/
+			if (procCarFound[currentLine] )
 			{
 				if (procCarDist[currentLine] < CAR_MIN_DIST)
 				{
@@ -342,7 +280,7 @@ int main() {
 			}
 			// check for collision on target line
 			double speedTargetLine = -1;
-			if (currentLine != targetLine && procCarFoundLine[targetLine])
+			if (currentLine != targetLine && procCarFound[targetLine])
 			{
 				if (procCarDist[targetLine] < CAR_MIN_DIST)
 				{
@@ -362,12 +300,10 @@ int main() {
 			{
 				targetSpeed = speedTargetLine;
 			}
-			/*
-			std::cout << "Current line:" << currentLine << std::endl;
-			std::cout << "Target speed:" << targetSpeed << std::endl;
-			std::cout << "Target line:" << targetLine << std::endl<< std::endl<< std::endl;
-			*/
 
+/************************************************************************************************/
+// Calculate desired patch based on desired line and speed
+/************************************************************************************************/
 			//Desired car position spaced at 30m
 			vector<double> sparsePosX;
 			vector<double> sparsePosY;
@@ -433,96 +369,87 @@ int main() {
 			}
 			// fit the spline 
 			tk::spline s;
-/*
-		  for (int i = 0; i < sparsePosX.size(); i++)
-		  {
-			  std::cout << "sp " << i << ": [" << sparsePosX[i] << ", " << sparsePosY[i] << "]" << std::endl;
-		  }
- */
-		  s.set_points(sparsePosX, sparsePosY);
+			s.set_points(sparsePosX, sparsePosY);
 
-		  // new path points including not used points from previous path
-          vector<double> next_x_vals;
-          vector<double> next_y_vals;
-		  for (int i = 0; i < prevSize; ++i)
-		  {
-			  next_x_vals.push_back(previous_path_x[i]);
-			  next_y_vals.push_back(previous_path_y[i]);
-		  }
-		  // Linearize spline on 30m
-		  double targetX = 30.0;
-		  double targetY = s(targetX);
-		  double targetDist = sqrt(targetX * targetX + targetY * targetY);
-		  double speedInc = MAX_ACC_MS2 * SAMPLING_INTERVAL_S;
-		  double xPointPrev = 0;
-		  double curSpeed;
-		  if (next_x_vals.size() > 2)
-		  {
-			  double xdiff = next_x_vals[next_x_vals.size() - 2] - next_x_vals[next_x_vals.size() - 1];
-			  double ydiff = next_y_vals[next_y_vals.size() - 2] - next_y_vals[next_y_vals.size() - 1];
-			  curSpeed = sqrt(xdiff*xdiff + ydiff * ydiff) / SAMPLING_INTERVAL_S;
-		  }
-		  else
-		  {
-			  curSpeed = car_speed / 2.23694; // car speed converted to m/s
-		  }
-		  for (int i = 1; i <= (DESIRED_PATCH_LEGTH - prevSize); ++i)
-		  {	
-			  double speedDiff = curSpeed - targetSpeed;
-			  if (abs(speedDiff) > SPEED_HIST_MS)
-			  {
-				  if (curSpeed < (targetSpeed - speedInc))
-				  {
-					  curSpeed += speedInc;
-				  }
-				  if (curSpeed > (targetSpeed + speedInc))
-				  {
-					  curSpeed -= speedInc;
-				  }
-			  }
-			  else
-			  {
-				  curSpeed = targetSpeed;
-			  }
-			  double Xinc = (targetX * curSpeed * SAMPLING_INTERVAL_S) / targetDist;
+			// new path points including not used points from previous path
+			vector<double> next_x_vals;
+			vector<double> next_y_vals;
+			for (int i = 0; i < prevSize; ++i)
+			{
+				next_x_vals.push_back(previous_path_x[i]);
+				next_y_vals.push_back(previous_path_y[i]);
+			}
+			// Linearize spline on 30m
+			double targetX = 30.0;
+			double targetY = s(targetX);
+			double targetDist = sqrt(targetX * targetX + targetY * targetY);
+			double speedInc = MAX_ACC_MS2 * SAMPLING_INTERVAL_S;
+			double xPointPrev = 0;
+			double curSpeed;
+			if (next_x_vals.size() > 2)
+			{
+				double xdiff = next_x_vals[next_x_vals.size() - 2] - next_x_vals[next_x_vals.size() - 1];
+				double ydiff = next_y_vals[next_y_vals.size() - 2] - next_y_vals[next_y_vals.size() - 1];
+				curSpeed = sqrt(xdiff*xdiff + ydiff * ydiff) / SAMPLING_INTERVAL_S;
+			}
+			else
+			{
+				curSpeed = car_speed / 2.23694; // car speed converted to m/s
+			}
+			for (int i = 1; i <= (DESIRED_PATCH_LEGTH - prevSize); ++i)
+			{	
+				double speedDiff = curSpeed - targetSpeed;
+				if (abs(speedDiff) > SPEED_HIST_MS)
+				{
+					if (curSpeed < (targetSpeed - speedInc))
+					{
+						curSpeed += speedInc;
+					}
+					if (curSpeed > (targetSpeed + speedInc))
+					{
+						curSpeed -= speedInc;
+					}
+				}
+				else
+				{
+					curSpeed = targetSpeed;
+				}
+				double Xinc = (targetX * curSpeed * SAMPLING_INTERVAL_S) / targetDist;
 
-			  xPointPrev = xPointPrev + Xinc;
-			  double xPoint = xPointPrev;
-			  double yPoint = s(xPoint);
-			  double xTemp = xPoint;
-			  double yTemp = yPoint; 
-			  // roteate it back to original refference 
-			  xPoint = xTemp * cos(refYaw) - yTemp * sin(refYaw);
-			  yPoint = xTemp * sin(refYaw) + yTemp * cos(refYaw);
+				xPointPrev = xPointPrev + Xinc;
+				double xPoint = xPointPrev;
+				double yPoint = s(xPoint);
+				double xTemp = xPoint;
+				double yTemp = yPoint; 
+				// roteate it back to original refference 
+				xPoint = xTemp * cos(refYaw) - yTemp * sin(refYaw);
+				yPoint = xTemp * sin(refYaw) + yTemp * cos(refYaw);
 
-			  xPoint += refX;
-			  yPoint += refY;
-			  next_x_vals.push_back(xPoint);
-			  next_y_vals.push_back(yPoint);
-		  }
-          /**
-           * TODO: define a path made up of (x,y) points that the car will visit
-           *   sequentially every .02 seconds
-           */
-          msgJson["next_x"] = next_x_vals;
-          msgJson["next_y"] = next_y_vals;
+				xPoint += refX;
+				yPoint += refY;
+				next_x_vals.push_back(xPoint);
+				next_y_vals.push_back(yPoint);
+			}
 
-          auto msg = "42[\"control\","+ msgJson.dump()+"]";
+			msgJson["next_x"] = next_x_vals;
+			msgJson["next_y"] = next_y_vals;
+
+			auto msg = "42[\"control\","+ msgJson.dump()+"]";
 #ifdef _MSC_VER
-		  ws->send(msg.data(), msg.length(), uWS::OpCode::TEXT);
+			ws->send(msg.data(), msg.length(), uWS::OpCode::TEXT);
 #else
-		  ws.send(msg.data(), msg.length(), uWS::OpCode::TEXT);
+			ws.send(msg.data(), msg.length(), uWS::OpCode::TEXT);
 #endif
-        }  // end "telemetry" if
+			}  // end "telemetry" if
       } else {
         // Manual driving
-        std::string msg = "42[\"manual\",{}]";
+			std::string msg = "42[\"manual\",{}]";
 #ifdef _MSC_VER
-		ws->send(msg.data(), msg.length(), uWS::OpCode::TEXT);
+			ws->send(msg.data(), msg.length(), uWS::OpCode::TEXT);
 #else
-        ws.send(msg.data(), msg.length(), uWS::OpCode::TEXT);
+			ws.send(msg.data(), msg.length(), uWS::OpCode::TEXT);
 #endif
-      }
+			}
     }  // end websocket if
   }); // end h.onMessage
 #ifdef _MSC_VER
