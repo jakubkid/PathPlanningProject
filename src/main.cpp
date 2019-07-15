@@ -19,7 +19,7 @@
 #define CAR_FOLLOW_DIST 25.0    // distance where we should follow
 #define CAR_BREAK_DIST 30.0     // Distance where we should start breaking
 #define CAR_AVOID_DIST 40.0     // Distance where we should start overtaking the car
-#define CAR_OVERTAKE_DIST 130.0 // Distance needed to overtake another car
+#define CAR_OVERTAKE_DIST 80.0 // Distance needed to overtake another car
 #define LINE_NUM 3
 #define LINE_WIDTH 4.0
 #define SPEED_THRESHOLD_MS 2.0 // only change line when speed difference is higher than 2m/s
@@ -151,7 +151,7 @@ int main() {
 					if (!procCarFoundLine[checkCarLaneNum] || (carDist < procCarDist[checkCarLaneNum]))
 					{
 						procCarDist[checkCarLaneNum] = carDist;
-						procCarSpeed[checkCarLaneNum] = checkCarSpeed > MAX_SPEED_MS? MAX_SPEED_MS : checkCarSpeed;
+						procCarSpeed[checkCarLaneNum] = checkCarSpeed > MAX_SPEED_MS ? MAX_SPEED_MS : checkCarSpeed;
 						procCarFoundLine[checkCarLaneNum] = true;
 					}
 				}
@@ -164,34 +164,48 @@ int main() {
 						trailingCarSpeed[checkCarLaneNum] = checkCarSpeed;
 						trailingCarFoundLine[checkCarLaneNum] = true;
 					}
-				}			
+				}
+			}
+			double maxLineSpeed =( procCarFoundLine[currentLine] ? procCarSpeed[currentLine]: MAX_SPEED_MS);
 
-				double maxLineSpeed =( procCarFoundLine[currentLine] ? procCarSpeed[currentLine]: MAX_SPEED_MS);
-
-				// check only left and right line
-				for (int checkLine = currentLine + 1; checkLine >= currentLine - 1; checkLine -= 2)
+			// check only left and right line
+			for (int checkLine = currentLine + 1; checkLine >= currentLine - 1; checkLine -= 2)
+			{
+				if (checkLine >= LINE_NUM || checkLine < 0)
 				{
-					if (checkLine >= LINE_NUM || checkLine < 0)
+					continue;
+				}
+				double trailingSpeedDiff = trailingCarSpeed[checkLine] - carSpeedMs;
+				// Check trailling car
+				if (!trailingCarFoundLine[checkLine] ||
+					(trailingCarDist[checkLine] > CAR_BREAK_DIST) && (trailingSpeedDiff < 0 || ((trailingCarDist[checkLine] / trailingSpeedDiff) > TIME_FOR_LINE_CHANGE_S)))
+				{
+					double procSpeedDiff = procCarSpeed[checkLine] - carSpeedMs;
+					//check leading car
+					if (!procCarFoundLine[checkLine] ||
+						(procSpeedDiff > SPEED_THRESHOLD_MS && procCarDist[checkLine] > CAR_BREAK_DIST) ||
+						procSpeedDiff <= SPEED_THRESHOLD_MS && procCarDist[checkLine] > CAR_OVERTAKE_DIST)
 					{
-						continue;
-					}
-					double trailingSpeedDiff = trailingCarSpeed[checkLine] - carSpeedMs;
-					// Check trailling car
-					if (!trailingCarFoundLine[checkLine] ||
-						(trailingCarDist[checkLine] > CAR_BREAK_DIST) && (trailingSpeedDiff < 0 || ((trailingCarDist[checkLine] / trailingSpeedDiff) > TIME_FOR_LINE_CHANGE_S)))
-					{
-						double procSpeedDiff = procCarSpeed[checkLine] - carSpeedMs;
-						//check leading car
-						if (!procCarFoundLine[checkLine] ||
-							(procSpeedDiff > SPEED_THRESHOLD_MS && procCarDist[checkLine] > CAR_BREAK_DIST) ||
-							procSpeedDiff <= SPEED_THRESHOLD_MS && procCarDist[checkLine] > CAR_OVERTAKE_DIST)
+						double procSpeed = (procCarFoundLine[checkLine] ? procCarSpeed[checkLine] : MAX_SPEED_MS);
+						// preffer going right
+						if (checkLine > currentLine)
 						{
-							double procSpeed = (procCarFoundLine[checkLine] ? procCarSpeed[checkLine] : MAX_SPEED_MS);
-							// preffer going right
-							if (checkLine > currentLine)
-							{
 
-								std::cout << "Change right procCarFoundLine[checkLine]:" << procCarFoundLine[checkLine] << " procSpeedDiff: " << procSpeedDiff << " procCarDist[checkLine]: " << procCarDist[checkLine] << std::endl;
+							std::cout << "Change right procCarFoundLine[checkLine]:" << procCarFoundLine[checkLine] << " procSpeedDiff: " << procSpeedDiff << " procCarDist[checkLine]: " << procCarDist[checkLine] << std::endl;
+							for (int i = 0; i < LINE_NUM; i++)
+							{
+								std::cout << i << " procCarFoundLine: " << procCarFoundLine[i] << " procCarDist: " << procCarDist[i] << std::endl;
+								std::cout << i << " trailingCarFoundLine: " << trailingCarFoundLine[i] << " trailingCarDist: " << trailingCarDist[i] << std::endl;
+							}
+							maxLineSpeed = procSpeed;
+							targetLine = checkLine;
+							break;
+						}
+						else
+						{
+							if (procCarFoundLine[currentLine] && procCarDist[currentLine] < CAR_AVOID_DIST)
+							{
+								std::cout << "Change left procCarDist curr:" << procCarDist[currentLine] << "procCarFoundLine[checkLine]" << procCarFoundLine[checkLine] << " procSpeedDiff: " << procSpeedDiff<< " procCarDist[checkLine]: "<< procCarDist[checkLine] <<  std::endl;
 								for (int i = 0; i < LINE_NUM; i++)
 								{
 									std::cout << i << " procCarFoundLine: " << procCarFoundLine[i] << " procCarDist: " << procCarDist[i] << std::endl;
@@ -199,60 +213,45 @@ int main() {
 								}
 								maxLineSpeed = procSpeed;
 								targetLine = checkLine;
-								break;
-							}
-							else
-							{
-								if (procCarFoundLine[currentLine] && procCarDist[currentLine] < CAR_AVOID_DIST)
-								{
-									std::cout << "Change left procCarDist curr:" << procCarDist[currentLine] << "procCarFoundLine[checkLine]" << procCarFoundLine[checkLine] << " procSpeedDiff: " << procSpeedDiff<< " procCarDist[checkLine]: "<< procCarDist[checkLine] <<  std::endl;
-									for (int i = 0; i < LINE_NUM; i++)
-									{
-										std::cout << i << " procCarFoundLine: " << procCarFoundLine[i] << " procCarDist: " << procCarDist[i] << std::endl;
-										std::cout << i << " trailingCarFoundLine: " << trailingCarFoundLine[i] << " trailingCarDist: " << trailingCarDist[i] << std::endl;
-									}
-									maxLineSpeed = procSpeed;
-									targetLine = checkLine;
-								}
 							}
 						}
 					}
 				}
+			}
 
-				// check for colision in current line
-				if (procCarFoundLine[currentLine] )
+			// check for colision in current line
+			if (procCarFoundLine[currentLine] )
+			{
+				if (procCarDist[currentLine] < CAR_MIN_DIST)
 				{
-					if (procCarDist[currentLine] < CAR_MIN_DIST)
+					targetSpeed = 0.9 * procCarSpeed[currentLine] - SPEED_HIST_MS;
+				}
+				else if(currentLine == targetLine)
+				{
+					if (procCarDist[currentLine] < CAR_FOLLOW_DIST)
 					{
-						targetSpeed = 0.9 * procCarSpeed[currentLine] - SPEED_HIST_MS;
+						targetSpeed = procCarSpeed[currentLine];
 					}
-					else if(currentLine == targetLine)
+					else if (procCarDist[currentLine] < CAR_BREAK_DIST)
 					{
-						if (procCarDist[currentLine] < CAR_FOLLOW_DIST)
-						{
-							targetSpeed = procCarSpeed[currentLine];
-						}
-						else if (procCarDist[currentLine] < CAR_BREAK_DIST)
-						{
-							targetSpeed = procCarSpeed[currentLine] + SPEED_HIST_MS;
-						}
+						targetSpeed = procCarSpeed[currentLine] + SPEED_HIST_MS;
 					}
 				}
-				// check for collision on target line
-				if (currentLine != targetLine && procCarFoundLine[targetLine])
+			}
+			// check for collision on target line
+			if (currentLine != targetLine && procCarFoundLine[targetLine])
+			{
+				if (procCarDist[targetLine] < CAR_MIN_DIST)
 				{
-					if (procCarDist[targetLine] < CAR_MIN_DIST)
-					{
-						targetSpeed = 0.9 * procCarSpeed[targetLine] - SPEED_HIST_MS;
-					}
-					else if (procCarDist[targetLine] < CAR_FOLLOW_DIST)
-					{
-						targetSpeed = procCarSpeed[targetLine];
-					}
-					else if (procCarDist[targetLine] < CAR_BREAK_DIST)
-					{
-						targetSpeed = procCarSpeed[targetLine] + SPEED_HIST_MS;
-					}
+					targetSpeed = 0.9 * procCarSpeed[targetLine] - SPEED_HIST_MS;
+				}
+				else if (procCarDist[targetLine] < CAR_FOLLOW_DIST)
+				{
+					targetSpeed = procCarSpeed[targetLine];
+				}
+				else if (procCarDist[targetLine] < CAR_BREAK_DIST)
+				{
+					targetSpeed = procCarSpeed[targetLine] + SPEED_HIST_MS;
 				}
 			}
 			std::cout << "Current line:" << currentLine << std::endl;
