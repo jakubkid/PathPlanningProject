@@ -10,7 +10,7 @@
 #include "spline.h"
 #define PRINT_DEBUG  // print debug
 #define MAX_SPEED_MS 22.3 // 22.3m/s ~50mph
-#define MAX_ACC_MS2 9.5
+#define MAX_ACC_MS2 7.0
 #define SAMPLING_INTERVAL_S 0.02 // in s
 #define SPEED_HIST_MS 0.2
 #define SPARSE_POINT_SPACING 30.0
@@ -321,44 +321,46 @@ int main() {
 			{
 				if(abs(checkLine*LINE_WIDTH + (LINE_WIDTH / 2) - )  )
 			}*/
-			double newSpeed = -1;
+
 			if (procCarFoundLine[currentLine] )
 			{
 				if (procCarDist[currentLine] < CAR_MIN_DIST)
 				{
-					newSpeed = 0.9 * procCarSpeed[currentLine] - SPEED_HIST_MS;
+					targetSpeed = 0.9 * procCarSpeed[currentLine] - SPEED_HIST_MS;
 				}
 				else if(currentLine == targetLine)
 				{
 					if (procCarDist[currentLine] < CAR_FOLLOW_DIST)
 					{
-						newSpeed = procCarSpeed[currentLine];
+						targetSpeed = procCarSpeed[currentLine];
 					}
 					else if (procCarDist[currentLine] < CAR_BREAK_DIST)
 					{
-						newSpeed = procCarSpeed[currentLine] + SPEED_HIST_MS;
+						targetSpeed = procCarSpeed[currentLine] + SPEED_HIST_MS;
 					}
 				}
 			}
 			// check for collision on target line
+			double speedTargetLine = -1;
 			if (currentLine != targetLine && procCarFoundLine[targetLine])
 			{
 				if (procCarDist[targetLine] < CAR_MIN_DIST)
 				{
-					newSpeed = 0.9 * procCarSpeed[targetLine] - SPEED_HIST_MS;
+					speedTargetLine = 0.9 * procCarSpeed[targetLine] - SPEED_HIST_MS;
 				}
 				else if (procCarDist[targetLine] < CAR_FOLLOW_DIST)
 				{
-					newSpeed = procCarSpeed[targetLine];
+					speedTargetLine = procCarSpeed[targetLine];
 				}
 				else if (procCarDist[targetLine] < CAR_BREAK_DIST)
 				{
-					newSpeed = procCarSpeed[targetLine] + SPEED_HIST_MS;
+					speedTargetLine = procCarSpeed[targetLine] + SPEED_HIST_MS;
 				}
 			}
-			if (newSpeed > 0)
+			// only update targetSpeed if needed and speed on target line is lower
+			if (speedTargetLine > 0 && speedTargetLine < targetSpeed)
 			{
-				targetSpeed = newSpeed;
+				targetSpeed = speedTargetLine;
 			}
 			/*
 			std::cout << "Current line:" << currentLine << std::endl;
