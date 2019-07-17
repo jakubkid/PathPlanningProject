@@ -8,28 +8,33 @@
 #include "helpers.h"
 #include "json.hpp"
 #include "spline.h"
+// for convenience
+using nlohmann::json;
+using std::string;
+using std::vector;
+
+
 //#define PRINT_DEBUG             // uncomment to print debug info
 #define LINE_NUM 3                // Number of lines
 #define LINE_WIDTH 4.0            // Line witdth in m
 #define SAMPLING_INTERVAL_S 0.02  // sampling interval in s
 #define MAX_SPEED_MS 22.3         // maximum speed 22.3m/s ~50mph
-#define MAX_ACC_MS2 7.0           // Maximum allowed acceleration in m/s2
+#define MAX_ACC_MS2 9.5           // Maximum allowed acceleration in m/s2
+#define MAX_CONF_MS2 5.0          // Max conftorable acceleration in m/s2
 #define SPEED_HIST_MS 0.2         // speed histeresis to avoid constant speed changes  in m/s
 #define SPARSE_POINT_SPACING 30.0 // Spacing of sparse points in m
 #define SPARSE_POINT_NUM 3        // number of Sparse points
 #define DESIRED_PATCH_LEGTH 30    // number of points in patch for simulator
 #define CHANGE_MIN_DIST 5.0       // minimum distance to the car in line change in m
 #define CAR_MIN_DIST 15.0         // minimum distance to the car in m
-#define CAR_FOLLOW_DIST 25.0      // distance where we should follow in m
-#define CAR_BREAK_DIST 30.0       // Distance where we should start breaking in m
+#define CAR_FOLLOW_DIST 20.0      // distance where we should follow in m
+#define CAR_BREAK_DIST 25.0       // Distance where we should start breaking in m
 #define CAR_AVOID_DIST 40.0       // Distance where we should start overtaking the car in m
 #define CAR_OVERTAKE_DIST 45.0    // Distance needed to overtake another car in m
+#define CAR_IGNORE_DIST 100.0     // Ignore cars further than this distance in m
 #define SPEED_THRESHOLD_MS 2.0    // Threshold when it is worth to change the line in m/s
-#define TIME_FOR_LINE_CHANGE_S 3  // Minimum time needed for line change in s
-// for convenience
-using nlohmann::json;
-using std::string;
-using std::vector;
+#define TIME_FOR_LINE_CHANGE_S 5  // Minimum time needed for line change in s
+
 
 //check if it is safe to change the line
 bool checkIfChangeIsSafe(int curLine, int destLine,double carSpeedMs,
@@ -158,6 +163,7 @@ int main() {
 			double targetSpeed = MAX_SPEED_MS; // target speed
 			int currentLine = (int)(car_d / LINE_WIDTH); // current line
 			int targetLine = currentLine; // target line (right when no cars detected)
+			bool emergencyBreak = false; // break emergency
 			double carSpeedMs = car_speed * 0.44704;
 			if (prevSize > 0)
 			{
@@ -214,10 +220,10 @@ int main() {
 //Calculate optimum line
 /************************************************************************************************/
 			int bestLine = -1;
-			// Find empty lines or lines with speeding cars
+			// Find empty lines or lines with speeding cars 
 			for (int checkLine = LINE_NUM - 1; checkLine >= 0; checkLine--)
 			{
-				if (!procCarFound[checkLine] || procCarSpeed[checkLine] >= MAX_SPEED_MS)
+				if (!procCarFound[checkLine] || procCarSpeed[checkLine] >= MAX_SPEED_MS || procCarDist[checkLine] >= CAR_IGNORE_DIST)
 				{
 					if (checkIfChangeIsSafe(currentLine, checkLine, carSpeedMs,
 						trailingCarFound, trailingCarSpeed, trailingCarDist,
@@ -225,6 +231,24 @@ int main() {
 					{
 						bestLine = checkLine;
 						break;
+					}
+				}
+			}
+			// Find with car furtherst away and provided that it is further than ignore distance
+			if (bestLine < 0)
+			{
+				double maxLineDist = 0;
+				for (int checkLine = LINE_NUM - 1; checkLine >= 0; checkLine--)
+				{
+					if (procCarDist[checkLine] > CAR_IGNORE_DIST && procCarDist[checkLine] > maxLineDist)
+					{
+						if (checkIfChangeIsSafe(currentLine, checkLine, carSpeedMs,
+							trailingCarFound, trailingCarSpeed, trailingCarDist,
+							procCarFound, procCarSpeed, procCarDist))
+						{
+							maxLineDist = procCarDist[checkLine];
+							bestLine = checkLine;
+						}
 					}
 				}
 			}
@@ -277,6 +301,10 @@ int main() {
 						targetSpeed = procCarSpeed[currentLine] + SPEED_HIST_MS;
 					}
 				}
+				if (procCarDist[currentLine] <= CHANGE_MIN_DIST)
+				{
+					emergencyBreak = true;
+				}
 			}
 			// check for collision on target line
 			double speedTargetLine = -1;
@@ -293,6 +321,10 @@ int main() {
 				else if (procCarDist[targetLine] < CAR_BREAK_DIST)
 				{
 					speedTargetLine = procCarSpeed[targetLine] + SPEED_HIST_MS;
+				}
+				if (procCarDist[targetLine] <= CHANGE_MIN_DIST)
+				{
+					emergencyBreak = true;
 				}
 			}
 			// only update targetSpeed if needed and speed on target line is lower
@@ -342,20 +374,24 @@ int main() {
 			//std::cout << "lastPointD: " << lastPointD << " car_d: " << car_d  << std::endl;
 			for (int i = 1; i <= SPARSE_POINT_NUM; i++)
 			{	
-				double targetLineD = (LINE_WIDTH/2 + LINE_WIDTH * targetLine);
-				if (abs(targetLineD - lastPointD) > (LINE_WIDTH / 2))
+				// Don't turn when emergency braking is happening
+				if (!emergencyBreak)
 				{
-					if (targetLineD > lastPointD)
+					double targetLineD = (LINE_WIDTH / 2 + LINE_WIDTH * targetLine);
+					if (abs(targetLineD - lastPointD) > (LINE_WIDTH / 2))
 					{
-						targetLineD = lastPointD + (LINE_WIDTH / 2);
+						if (targetLineD > lastPointD)
+						{
+							targetLineD = lastPointD + (LINE_WIDTH / 2);
+						}
+						else
+						{
+							targetLineD = lastPointD - (LINE_WIDTH / 2);
+						}
 					}
-					else
-					{
-						targetLineD = lastPointD - (LINE_WIDTH / 2);
-					}
+					lastPointD = targetLineD;
 				}
-				lastPointD = targetLineD;
-				vector<double> point = getXY(ourS + i * SPARSE_POINT_SPACING, targetLineD, map_waypoints_s, map_waypoints_x, map_waypoints_y);
+				vector<double> point = getXY(ourS + i * SPARSE_POINT_SPACING, lastPointD, map_waypoints_s, map_waypoints_x, map_waypoints_y);
 				sparsePosX.push_back(point[0]);
 				sparsePosY.push_back(point[1]);
 			}
@@ -383,9 +419,16 @@ int main() {
 			double targetX = 30.0;
 			double targetY = s(targetX);
 			double targetDist = sqrt(targetX * targetX + targetY * targetY);
-			double speedInc = MAX_ACC_MS2 * SAMPLING_INTERVAL_S;
+			double speedInc = MAX_CONF_MS2 * SAMPLING_INTERVAL_S;
 			double xPointPrev = 0;
 			double curSpeed;
+			if (emergencyBreak)
+			{
+//#ifdef PRINT_DEBUG
+				std::cout << "Emergency break " << std::endl;
+//#endif
+				double speedInc = MAX_ACC_MS2 * SAMPLING_INTERVAL_S;
+			}
 			if (next_x_vals.size() > 2)
 			{
 				double xdiff = next_x_vals[next_x_vals.size() - 2] - next_x_vals[next_x_vals.size() - 1];
