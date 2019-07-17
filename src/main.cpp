@@ -31,7 +31,7 @@ using std::vector;
 #define CAR_BREAK_DIST 25.0       // Distance where we should start breaking in m
 #define CAR_AVOID_DIST 40.0       // Distance where we should start overtaking the car in m
 #define CAR_OVERTAKE_DIST 45.0    // Distance needed to overtake another car in m
-#define CAR_IGNORE_DIST 100.0     // Ignore cars further than this distance in m
+#define CAR_IGNORE_DIST 200.0     // Distance of ignored cars because detection is nor reliable in m
 #define SPEED_THRESHOLD_MS 2.0    // Threshold when it is worth to change the line in m/s
 #define TIME_FOR_LINE_CHANGE_S 5  // Minimum time needed for line change in s
 
@@ -220,10 +220,10 @@ int main() {
 //Calculate optimum line
 /************************************************************************************************/
 			int bestLine = -1;
-			// Find empty lines or lines with speeding cars 
+			// Find empty lines or lines with speeding cars or too far
 			for (int checkLine = LINE_NUM - 1; checkLine >= 0; checkLine--)
 			{
-				if (!procCarFound[checkLine] || procCarSpeed[checkLine] >= MAX_SPEED_MS || procCarDist[checkLine] >= CAR_IGNORE_DIST)
+				if (!procCarFound[checkLine] || procCarSpeed[checkLine] >= MAX_SPEED_MS || procCarDist[checkLine] > CAR_IGNORE_DIST)
 				{
 					if (checkIfChangeIsSafe(currentLine, checkLine, carSpeedMs,
 						trailingCarFound, trailingCarSpeed, trailingCarDist,
@@ -240,7 +240,7 @@ int main() {
 				double maxLineDist = 0;
 				for (int checkLine = LINE_NUM - 1; checkLine >= 0; checkLine--)
 				{
-					if (procCarDist[checkLine] > CAR_IGNORE_DIST && procCarDist[checkLine] > maxLineDist)
+					if (procCarDist[checkLine] > CAR_OVERTAKE_DIST && procCarDist[checkLine] > maxLineDist)
 					{
 						if (checkIfChangeIsSafe(currentLine, checkLine, carSpeedMs,
 							trailingCarFound, trailingCarSpeed, trailingCarDist,
@@ -258,8 +258,7 @@ int main() {
 				double maxLineSpeed = 0;
 				for (int checkLine = LINE_NUM - 1; checkLine >= 0; checkLine--)
 				{
-					if ((procCarSpeed[checkLine] > maxLineSpeed + SPEED_THRESHOLD_MS) ||
-						((maxLineSpeed < (MAX_SPEED_MS - SPEED_THRESHOLD_MS)) && (procCarDist[checkLine] > CAR_OVERTAKE_DIST)))
+					if (procCarSpeed[checkLine] > maxLineSpeed + SPEED_THRESHOLD_MS)
 					{
 						if (checkIfChangeIsSafe(currentLine, checkLine, carSpeedMs,
 							trailingCarFound, trailingCarSpeed, trailingCarDist,
