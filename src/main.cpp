@@ -20,7 +20,9 @@ using std::vector;
 #define SAMPLING_INTERVAL_S 0.02  // sampling interval in s
 #define MAX_SPEED_MS 22.3         // maximum speed 22.3m/s ~50mph
 #define MAX_ACC_MS2 9.5           // Maximum allowed acceleration in m/s2
-#define MAX_CONF_MS2 4.5          // Max conftorable acceleration in m/s2
+#define CONF_ACC_MS2 6.0          // Max conftorable acceleration in m/s2
+#define MAX_JERK_MS3 9.5           // Maximum allowed jerk in m/s3
+#define CONF_JERK_MS3 6.0         // Max conftorable jerk in m/s3
 #define SPEED_HIST_MS 0.2         // speed histeresis to avoid constant speed changes  in m/s
 #define SPARSE_POINT_SPACING 30.0 // Spacing of sparse points in m
 #define SPARSE_POINT_NUM 3        // number of Sparse points
@@ -418,44 +420,76 @@ int main() {
 			double targetX = 30.0;
 			double targetY = s(targetX);
 			double targetDist = sqrt(targetX * targetX + targetY * targetY);
-			double speedInc = MAX_CONF_MS2 * SAMPLING_INTERVAL_S;
 			double xPointPrev = 0;
-			double curSpeed;
+			static double curSpeed = 0;
+			static double curAcc = 0;
+			double maxAcc;
+			double accInc;
+			if (next_x_vals.size() == 0)
+			{
+				curSpeed = car_speed / 2.23694; // car speed converted to m/s
+				curAcc = 0;
+			}
+			
 			if (emergencyBreak)
 			{
-//#ifdef PRINT_DEBUG
+				maxAcc = MAX_ACC_MS2;
+				accInc = MAX_JERK_MS3 * SAMPLING_INTERVAL_S;
+				//#ifdef PRINT_DEBUG
 				std::cout << "Emergency break " << std::endl;
-//#endif
-				speedInc = MAX_ACC_MS2 * SAMPLING_INTERVAL_S;
-			}
-			if (next_x_vals.size() > 2)
-			{
-				double xdiff = next_x_vals[next_x_vals.size() - 2] - next_x_vals[next_x_vals.size() - 1];
-				double ydiff = next_y_vals[next_y_vals.size() - 2] - next_y_vals[next_y_vals.size() - 1];
-				curSpeed = sqrt(xdiff*xdiff + ydiff * ydiff) / SAMPLING_INTERVAL_S;
+				//#endif
 			}
 			else
 			{
-				curSpeed = car_speed / 2.23694; // car speed converted to m/s
+				maxAcc = CONF_ACC_MS2;
+				accInc = CONF_JERK_MS3 * SAMPLING_INTERVAL_S;
 			}
 			for (int i = 1; i <= (DESIRED_PATCH_LEGTH - prevSize); ++i)
 			{	
-				double speedDiff = curSpeed - targetSpeed;
-				if (abs(speedDiff) > SPEED_HIST_MS)
+				double speedDiff = targetSpeed - curSpeed;
+				if (abs(speedDiff) > SPEED_HIST_MS && abs(speedDiff) > maxAcc*SAMPLING_INTERVAL_S)
 				{
-					if (curSpeed < (targetSpeed - speedInc))
+					if (speedDiff < (curAcc*curAcc / CONF_JERK_MS3))
 					{
-						curSpeed += speedInc;
+						// start slowing accelertion down
+						if (curAcc > 0)
+						{
+							curAcc -= accInc;
+						}
+						else
+						{
+							curAcc += accInc;
+						}
 					}
-					if (curSpeed > (targetSpeed + speedInc))
+					if (speedDiff > 0)
 					{
-						curSpeed -= speedInc;
+						if (curAcc < (maxAcc - accInc))
+						{
+							curAcc += accInc;
+						}
+						else
+						{
+							curAcc = maxAcc;
+						}
 					}
+					else
+					{
+						if (curAcc > -(maxAcc - accInc))
+						{
+							curAcc -= accInc;
+						}
+						else
+						{
+							curAcc = -maxAcc;
+						}
+					}
+					curSpeed += curAcc * SAMPLING_INTERVAL_S;
 				}
 				else
 				{
 					curSpeed = targetSpeed;
 				}
+				//std::cout << "curSpeed: " << curSpeed<< " curAcc: "<< curAcc << " accInc: " <<accInc<< std::endl;
 				double Xinc = (targetX * curSpeed * SAMPLING_INTERVAL_S) / targetDist;
 
 				xPointPrev = xPointPrev + Xinc;
