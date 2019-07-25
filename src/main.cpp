@@ -20,7 +20,7 @@ using std::vector;
 #define SAMPLING_INTERVAL_S 0.02  // sampling interval in s
 #define MAX_SPEED_MS 22.3         // maximum speed 22.3m/s ~50mph
 #define MAX_ACC_MS2 9.5           // Maximum allowed acceleration in m/s2
-#define MAX_CONF_MS2 5.0          // Max conftorable acceleration in m/s2
+#define MAX_CONF_MS2 4.5          // Max conftorable acceleration in m/s2
 #define SPEED_HIST_MS 0.2         // speed histeresis to avoid constant speed changes  in m/s
 #define SPARSE_POINT_SPACING 30.0 // Spacing of sparse points in m
 #define SPARSE_POINT_NUM 3        // number of Sparse points
@@ -426,7 +426,7 @@ int main() {
 //#ifdef PRINT_DEBUG
 				std::cout << "Emergency break " << std::endl;
 //#endif
-				double speedInc = MAX_ACC_MS2 * SAMPLING_INTERVAL_S;
+				speedInc = MAX_ACC_MS2 * SAMPLING_INTERVAL_S;
 			}
 			if (next_x_vals.size() > 2)
 			{
