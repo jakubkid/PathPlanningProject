@@ -19,7 +19,7 @@ Self-Driving Car Engineer Nanodegree Program
    It is achieved by selecting the line with car furthest away and if all lines become blocked fastest line is selected. Line selection algorithm prefers right line when overtaking is not needed.
     * Speed is limited to speed limit or line speed proceeding car speed if overtaking is not possible
     * Line selection algorithm defines target speed and line and patch generation algorithm makes sure to limit acceleration and jerk in all axis to allowed values.
-    * Line selection algorithm makes sure target speed is approriate, it also asks Patch generation algorithm to do emergency braking when car in front is dangerously close.
+    * Line selection algorithm makes sure target speed is appropriate, it also asks Patch generation algorithm to do emergency braking when car in front is dangerously close.
     
 * Path generation 
     * Patch generation takes input from 
