@@ -32,7 +32,7 @@ using std::vector;
 #define CAR_FOLLOW_DIST 20.0      // distance where we should follow in m
 #define CAR_BREAK_DIST 25.0       // Distance where we should start breaking in m
 #define CAR_AVOID_DIST 40.0       // Distance where we should start overtaking the car in m
-#define CAR_OVERTAKE_DIST 45.0    // Distance needed to overtake another car in m
+#define CAR_OVERTAKE_DIST 41.0    // Distance needed to overtake another car in m
 #define CAR_IGNORE_DIST 200.0     // Distance of ignored cars because detection is nor reliable in m
 #define SPEED_THRESHOLD_MS 2.0    // Threshold when it is worth to change the line in m/s
 #define TIME_FOR_LINE_CHANGE_S 5  // Minimum time needed for line change in s
@@ -335,7 +335,7 @@ int main() {
 			}
 
 /************************************************************************************************/
-// Calculate desired patch based on desired line and speed
+// Calculate desired patch based on desired line
 /************************************************************************************************/
 			//Desired car position spaced at 30m
 			vector<double> sparsePosX;
@@ -369,13 +369,12 @@ int main() {
 			sparsePosX.push_back(refX);
 			sparsePosY.push_back(prevRefY);
 			sparsePosY.push_back(refY);
-			// add 3 points apaced 30m appart in the middle of the road for the fit
+			// add 3 points apaced 30m each point can be only half of line length away from current d position
 			vector<double> lastPointFren = getFrenet(refX, refY, refYaw, map_waypoints_x, map_waypoints_y);
 			double lastPointD = lastPointFren[1];
-			//std::cout << "lastPointD: " << lastPointD << " car_d: " << car_d  << std::endl;
 			for (int i = 1; i <= SPARSE_POINT_NUM; i++)
 			{	
-				// Don't turn when emergency braking is happening
+				// Don't turn when emergency braking is engaged to avoid exceeding total acceleration
 				if (!emergencyBreak)
 				{
 					double targetLineD = (LINE_WIDTH / 2 + LINE_WIDTH * targetLine);
@@ -396,7 +395,7 @@ int main() {
 				sparsePosX.push_back(point[0]);
 				sparsePosY.push_back(point[1]);
 			}
-			// Shift and rotate sparse points to (0,0) and 0'C
+			// Shift and rotate sparse points to (0,0) and 0'
 			for (int i = 0; i < sparsePosX.size(); i++)
 			{
 				double distX = sparsePosX[i] - refX;
@@ -416,6 +415,9 @@ int main() {
 				next_x_vals.push_back(previous_path_x[i]);
 				next_y_vals.push_back(previous_path_y[i]);
 			}
+/************************************************************************************************/
+// Linearize spleen following desired speed with regards to maximum jerk and acceleration
+/************************************************************************************************/
 			// Linearize spline on 30m
 			double targetX = 30.0;
 			double targetY = s(targetX);
@@ -435,23 +437,26 @@ int main() {
 			{
 				maxAcc = MAX_ACC_MS2;
 				accInc = MAX_JERK_MS3 * SAMPLING_INTERVAL_S;
-				//#ifdef PRINT_DEBUG
+#ifdef PRINT_DEBUG
 				std::cout << "Emergency break " << std::endl;
-				//#endif
+#endif
 			}
 			else
 			{
 				maxAcc = CONF_ACC_MS2;
 				accInc = CONF_JERK_MS3 * SAMPLING_INTERVAL_S;
 			}
+#ifdef PRINT_DEBUG
+			std::cout << "curSpeed: " << curSpeed << " curAcc: " << curAcc << " accInc: " << accInc << std::endl;
+#endif
 			for (int i = 1; i <= (DESIRED_PATCH_LEGTH - prevSize); ++i)
 			{	
 				double speedDiff = targetSpeed - curSpeed;
 				if (abs(speedDiff) > SPEED_HIST_MS && abs(speedDiff) > maxAcc*SAMPLING_INTERVAL_S)
 				{
-					if (speedDiff < (curAcc*curAcc / CONF_JERK_MS3))
+					if (abs(speedDiff) < (curAcc*curAcc / CONF_JERK_MS3) && abs(curAcc) > accInc)
 					{
-						// start slowing accelertion down
+						// start slowing accelertion down because speed diff is small when compared to acceleration
 						if (curAcc > 0)
 						{
 							curAcc -= accInc;
@@ -461,8 +466,9 @@ int main() {
 							curAcc += accInc;
 						}
 					}
-					if (speedDiff > 0)
+					else if (speedDiff > 0)
 					{
+						// Increase acceleration if possible
 						if (curAcc < (maxAcc - accInc))
 						{
 							curAcc += accInc;
@@ -474,6 +480,7 @@ int main() {
 					}
 					else
 					{
+						// Decrease acceleration if possible
 						if (curAcc > -(maxAcc - accInc))
 						{
 							curAcc -= accInc;
@@ -487,7 +494,9 @@ int main() {
 				}
 				else
 				{
+					// target speed reached stop accelerating
 					curSpeed = targetSpeed;
+					curAcc = 0;
 				}
 				//std::cout << "curSpeed: " << curSpeed<< " curAcc: "<< curAcc << " accInc: " <<accInc<< std::endl;
 				double Xinc = (targetX * curSpeed * SAMPLING_INTERVAL_S) / targetDist;
