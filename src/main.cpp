@@ -176,7 +176,7 @@ int main() {
 				ourS = car_s;
 			}
 /************************************************************************************************/
-// Find proceeding and trailing car on each line
+// Step 1: Find proceeding and trailing car on each line
 /************************************************************************************************/
 			double procCarSpeed[LINE_NUM];                // speed of car infront per line
 			double trailingCarSpeed[LINE_NUM];            // speed of trailing car per line
@@ -219,7 +219,7 @@ int main() {
 				}
 			}
 /************************************************************************************************/
-//Calculate optimum line
+//Step 2: Calculate optimum line
 /************************************************************************************************/
 			int bestLine = -1;
 			// Find empty lines or lines with speeding cars or too far
@@ -283,7 +283,7 @@ int main() {
 				targetLine = currentLine;
 			}
 /************************************************************************************************/
-//Adapt speed to avoid colisions
+//Step 3: Adapt speed to avoid colisions
 /************************************************************************************************/
 			if (procCarFound[currentLine] )
 			{
@@ -335,7 +335,7 @@ int main() {
 			}
 
 /************************************************************************************************/
-// Calculate desired patch based on desired line
+//Step 4: Calculate desired patch based on desired line
 /************************************************************************************************/
 			//Desired car position spaced at 30m
 			vector<double> sparsePosX;
@@ -416,7 +416,7 @@ int main() {
 				next_y_vals.push_back(previous_path_y[i]);
 			}
 /************************************************************************************************/
-// Linearize spleen following desired speed with regards to maximum jerk and acceleration
+//Step 5: Linearize spline following desired speed with regards to maximum jerk and acceleration
 /************************************************************************************************/
 			// Linearize spline on 30m
 			double targetX = 30.0;

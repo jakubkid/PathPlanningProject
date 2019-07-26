@@ -10,19 +10,25 @@ Self-Driving Car Engineer Nanodegree Program
 ## Write up
 
 * Valid Trajectories
-    * Algorithm generating valid trajectories is divided into 3 steps:
-        * Finding proceeding and trailing car on each line and recording distance and speed
-        * Calculating optimum line which could be safely reach
-        * Calculating safe speed and determining if emergency braking is needed
+    * Algorithm generating valid trajectories is divided into 5 steps:
+        * Find proceeding and trailing car on each line
+            Record speed and distance of trailing and leading car on each line
+        * Calculate optimum line
+            Select the line which we should be driving now it has to be safe to reach (other cars) if there are several best choices car will always select right line
+        * Adapt speed to avoid collisions
+            Select safe speed for driving, either maximum allowed speed or follow speed. This step also decides if emergency breaking is needed.
+        * Calculate desired patch based on desired line
+            Calculate desired patch which will reach desired line while minimizing sideway accelerations using spline fit.
+        * Linearize spline following desired speed with regards to maximum jerk and acceleration
+            Select the points 0.02s apart which will reach desired speed with regards to maximum or comfortable (depending if emergency breaking is engaged) acceleration and jerk.
     * The algorithm generates trajectories which allow long stretches without incident example below:
    ![Example Drive][driveExample]
-   It is achieved by selecting the line with car furthest away and if all lines become blocked fastest line is selected. Line selection algorithm prefers right line when overtaking is not needed.
-    * Speed is limited to speed limit or line speed proceeding car speed if overtaking is not possible
-    * Line selection algorithm defines target speed and line and patch generation algorithm makes sure to limit acceleration and jerk in all axis to allowed values.
-    * Line selection algorithm makes sure target speed is appropriate, it also asks Patch generation algorithm to do emergency braking when car in front is dangerously close.
-    
+     
 * Path generation 
-    * Patch generation takes input from 
+    * Patch generation takes last 2 points form previous trajectory or current car position and based on desired line and speed and maximum allowed acceleration and jerk it generates points spaced 0.02s apart.
+        First, 3 points are added spaced 30m apart steering car to desired line but moving maximum 0.5 line width at time to make line change smooth 
+        Next, spline fit is calculated on all points.
+        Finally, points spaced 0.02s are selected on the spline which will reach desired speed respecting maximum allowed jerk or acceleration.
  
 
 ## Dependencies
