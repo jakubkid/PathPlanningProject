@@ -7,7 +7,7 @@ Self-Driving Car Engineer Nanodegree Program
 
 ---
 
-## Write up
+## Report
 
 * Valid Trajectories
     * Algorithm generating valid trajectories is divided into 5 steps:
